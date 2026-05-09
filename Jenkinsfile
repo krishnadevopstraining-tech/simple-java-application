@@ -26,7 +26,7 @@ pipeline {
             steps {
                 sh '''
                 cp target/*.jar app.jar
-                BUILD_ID=dontKillMe nohup java -jar app.jar --server.port=8081 > logs.logs 2>&1 &
+                java -jar app.jar --server.port=8081
                 '''
             }
         }
