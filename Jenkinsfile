@@ -26,7 +26,7 @@ pipeline {
 
                         sh """
                         ${scannerHome}/bin/sonar-scanner \
-                        -Dsonar.projectKey=simple-java-application \
+                        -Dsonar.projectKey=simple-java-application1 \
                         -Dsonar.sources=. \
                         -Dsonar.java.binaries=target/classes
                         """
