@@ -15,6 +15,25 @@ pipeline {
                 '''
             }
         }
+        stage('Sonar Analysis') {
+            steps {
+
+                script {
+
+                    def scannerHome = tool 'sonarqube'
+
+                    withSonarQubeEnv('sonarqube') {
+
+                        sh """
+                        ${scannerHome}/bin/sonar-scanner \
+                        -Dsonar.projectKey=simple-java-application \
+                        -Dsonar.sources=. \
+                        -Dsonar.java.binaries=target/classes
+                        """
+                    }
+                }
+            }
+        }
         stage('test') {
             steps {
                 sh 'mvn test'
@@ -24,7 +43,7 @@ pipeline {
             steps {
                 sh '''
                 cp target/*.jar app.jar
-                JENKINS_NODE_COOKIE=dontKillMe nohup java -jar app.jar --server.port=8083 > logs.logs 2>&1 &
+                JENKINS_NODE_COOKIE=dontKillMe nohup java -jar app.jar --server.port=8081 > logs.logs 2>&1 &
                 '''
             }
         }
