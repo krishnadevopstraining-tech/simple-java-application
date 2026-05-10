@@ -1,7 +1,5 @@
 pipeline {
-    agent {
-        label 'linux-agent'
-    }
+    agent any
     stages {
         stage('checkout') {
             steps {
@@ -26,7 +24,7 @@ pipeline {
             steps {
                 sh '''
                 cp target/*.jar app.jar
-                java -jar app.jar --server.port=8081
+                JENKINS_NODE_COOKIE=dontKillMe nohup java -jar app.jar --server.port=8083 > logs.logs 2>&1 &
                 '''
             }
         }
