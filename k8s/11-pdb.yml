@@ -1,0 +1,23 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: backend-pdb
+  namespace: krishna-devops
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: krishna-devops
+      component: backend
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend-pdb
+  namespace: krishna-devops
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: krishna-devops
+      component: frontend

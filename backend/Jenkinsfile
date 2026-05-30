@@ -1,0 +1,205 @@
+pipeline {
+    agent any
+
+    options {
+        timeout(time: 1, unit: 'HOURS')
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
+    environment {
+        REGISTRY_URL = credentials('docker-registry-url')
+        REGISTRY_USERNAME = credentials('docker-registry-username')
+        REGISTRY_PASSWORD = credentials('docker-registry-password')
+        IMAGE_NAME = 'krishna-backend'
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        SERVICE_NAME = 'backend'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo "🔄 Checking out ${SERVICE_NAME} source code..."
+                checkout scm
+                sh 'git log --oneline -5'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                echo "🔨 Building ${SERVICE_NAME} service..."
+                dir('backend') {
+                    sh '''
+                        mvn clean package -DskipTests \
+                            -Dorg.slf4j.simpleLogger.defaultLogLevel=info \
+                            -Dmaven.repo.local=.m2
+                    '''
+                }
+            }
+        }
+
+        stage('Unit Tests') {
+            steps {
+                echo "🧪 Running unit tests for ${SERVICE_NAME}..."
+                dir('backend') {
+                    sh '''
+                        mvn test \
+                            -Dorg.slf4j.simpleLogger.defaultLogLevel=info \
+                            -Dmaven.repo.local=.m2
+                    '''
+                }
+            }
+        }
+
+        stage('Code Quality Analysis') {
+            steps {
+                echo "📊 Running SonarQube analysis..."
+                dir('backend') {
+                    sh '''
+                        mvn sonar:sonar \
+                            -Dsonar.projectKey=krishna-backend \
+                            -Dsonar.host.url=${SONAR_HOST_URL} \
+                            -Dsonar.login=${SONAR_TOKEN} \
+                            -Dorg.slf4j.simpleLogger.defaultLogLevel=info || true
+                    '''
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo "🐳 Building Docker image for ${SERVICE_NAME}..."
+                sh '''
+                    docker build \
+                        -f backend/Dockerfile \
+                        -t ${REGISTRY_URL}/${IMAGE_NAME}:${IMAGE_TAG} \
+                        -t ${REGISTRY_URL}/${IMAGE_NAME}:latest \
+                        .
+                '''
+                sh 'docker image ls | grep ${IMAGE_NAME}'
+            }
+        }
+
+        stage('Security Scan') {
+            steps {
+                echo "🔒 Scanning Docker image for vulnerabilities..."
+                sh '''
+                    docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        aquasec/trivy image \
+                        ${REGISTRY_URL}/${IMAGE_NAME}:${IMAGE_TAG} \
+                        --severity HIGH,CRITICAL \
+                        || true
+                '''
+            }
+        }
+
+        stage('Push to Registry') {
+            when {
+                branch 'main'
+            }
+            steps {
+                echo "📤 Pushing Docker image to registry..."
+                sh '''
+                    echo "${REGISTRY_PASSWORD}" | docker login -u "${REGISTRY_USERNAME}" --password-stdin ${REGISTRY_URL}
+                    
+                    docker push ${REGISTRY_URL}/${IMAGE_NAME}:${IMAGE_TAG}
+                    docker push ${REGISTRY_URL}/${IMAGE_NAME}:latest
+                    
+                    docker logout ${REGISTRY_URL}
+                '''
+            }
+        }
+
+        stage('Deploy to Staging') {
+            when {
+                branch 'main'
+            }
+            steps {
+                echo "🚀 Deploying ${SERVICE_NAME} to staging..."
+                sh '''
+                    # Deploy using kubectl or your deployment tool
+                    kubectl set image deployment/backend \
+                        backend=${REGISTRY_URL}/${IMAGE_NAME}:${IMAGE_TAG} \
+                        -n krishna-devops-staging || true
+                    
+                    kubectl rollout status deployment/backend \
+                        -n krishna-devops-staging --timeout=5m || true
+                '''
+            }
+        }
+
+        stage('Integration Tests') {
+            when {
+                branch 'main'
+            }
+            steps {
+                echo "🧪 Running integration tests..."
+                sh '''
+                    # Wait for service to be ready
+                    for i in {1..30}; do
+                        if curl -f http://localhost:8080/actuator/health > /dev/null 2>&1; then
+                            echo "Backend is healthy"
+                            break
+                        fi
+                        echo "Waiting for backend... ($i/30)"
+                        sleep 2
+                    done
+                    
+                    # Test API endpoints
+                    echo "Testing API endpoints..."
+                    curl -v http://localhost:8080/api/v1/health || true
+                    curl -v http://localhost:8080/swagger-ui.html || true
+                '''
+            }
+        }
+
+        stage('Deploy to Production') {
+            when {
+                branch 'main'
+                tag "v*"
+            }
+            input {
+                message "Deploy to production?"
+                ok "Deploy"
+            }
+            steps {
+                echo "🚀 Deploying ${SERVICE_NAME} to production..."
+                sh '''
+                    kubectl set image deployment/backend \
+                        backend=${REGISTRY_URL}/${IMAGE_NAME}:${IMAGE_TAG} \
+                        -n krishna-devops
+                    
+                    kubectl rollout status deployment/backend \
+                        -n krishna-devops --timeout=10m
+                    
+                    echo "Production deployment completed"
+                '''
+            }
+        }
+
+        stage('Notify') {
+            steps {
+                echo "📬 Build notification..."
+                sh '''
+                    echo "✅ Backend Pipeline Completed"
+                    echo "Image: ${REGISTRY_URL}/${IMAGE_NAME}:${IMAGE_TAG}"
+                    echo "Build Number: ${BUILD_NUMBER}"
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            echo '🧹 Cleaning up workspace...'
+            cleanWs()
+        }
+        success {
+            echo "✅ Backend pipeline completed successfully!"
+        }
+        failure {
+            echo "❌ Backend pipeline failed!"
+        }
+    }
+}

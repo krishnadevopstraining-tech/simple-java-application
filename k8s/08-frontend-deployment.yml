@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: krishna-devops
+  labels:
+    app: krishna-devops
+    component: frontend
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: krishna-devops
+      component: frontend
+  template:
+    metadata:
+      labels:
+        app: krishna-devops
+        component: frontend
+    spec:
+      containers:
+      - name: frontend
+        image: krishnadevopstraining/krishna-frontend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3000
+          name: http
+          protocol: TCP
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /index.html
+            port: 3000
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /index.html
+            port: 3000
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 3
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        fsReadOnlyRootFilesystem: true
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - krishna-devops
+              topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: krishna-devops
+  labels:
+    app: krishna-devops
+    component: frontend
+spec:
+  type: ClusterIP
+  selector:
+    app: krishna-devops
+    component: frontend
+  ports:
+  - port: 3000
+    targetPort: http
+    protocol: TCP
+    name: http

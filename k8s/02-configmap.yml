@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: krishna-devops
+  labels:
+    app: krishna-devops
+data:
+  # Backend Configuration
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: krishna_db
+  DB_POOL_SIZE: "10"
+  SERVER_PORT: "8080"
+  SPRING_PROFILES_ACTIVE: kubernetes
+  
+  # Frontend Configuration
+  REACT_APP_API_URL: "http://localhost:8080"
+  
+  # Database Configuration
+  POSTGRES_DB: krishna_db

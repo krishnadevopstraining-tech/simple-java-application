@@ -1,0 +1,13 @@
+# Docker
+FROM
+RUN
+COPY
+ADD
+ENV
+EXPOSE
+CMD
+ENTRYPOINT
+HEALTHCHECK
+
+# These layers are cached and reused unless inputs change
+# Keep frequently changing content at the end

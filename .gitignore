@@ -1,0 +1,33 @@
+.DS_Store
+.env
+.env.local
+*.log
+logs/
+target/
+dist/
+build/
+node_modules/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cache/
+.gradle/
+
+# Frontend
+frontend/dist/
+frontend/build/
+frontend/node_modules/
+
+# Backend
+backend/target/
+backend/logs/
+
+# IDE
+.project
+.classpath
+.settings/
+
+# OS
+Thumbs.db

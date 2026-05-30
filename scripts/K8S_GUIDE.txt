@@ -1,0 +1,85 @@
+#!/bin/bash
+
+# Kubernetes deployment README
+
+echo "
+╔════════════════════════════════════════════════════════════════╗
+║     Krishna DevOps - Kubernetes Deployment Guide              ║
+╚════════════════════════════════════════════════════════════════╝
+
+📋 Prerequisites:
+  ✓ kubectl configured to connect to your cluster
+  ✓ Docker images pushed to krishnadevopstraining/<service>:latest
+  ✓ NGINX Ingress Controller installed (for ingress support)
+
+🚀 Quick Start:
+
+  1. Make scripts executable:
+     chmod +x scripts/*.sh
+
+  2. Deploy to Kubernetes:
+     ./scripts/deploy-k8s.sh
+
+  3. Check deployment status:
+     kubectl get pods -n krishna-devops
+
+  4. View logs:
+     kubectl logs -f deployment/backend -n krishna-devops
+
+  5. Port forward (for local testing):
+     kubectl port-forward -n krishna-devops svc/frontend 3000:3000
+     kubectl port-forward -n krishna-devops svc/backend 8080:8080
+
+📦 What's Deployed:
+
+  - PostgreSQL Database (1 replica)
+  - Backend Service (3 replicas with HPA)
+  - Frontend Service (3 replicas with HPA)
+  - Persistent Volume for database
+  - ConfigMaps for configuration
+  - Secrets for credentials
+  - Ingress for routing
+  - Pod Disruption Budgets for high availability
+  - Horizontal Pod Autoscalers for auto-scaling
+
+🔧 Customization:
+
+  Environment variables can be modified in:
+    k8s/02-configmap.yml    - General configuration
+    k8s/03-secrets.yml      - Database credentials
+
+  Image registry can be modified in:
+    k8s/07-backend-deployment.yml
+    k8s/08-frontend-deployment.yml
+
+📊 Monitoring:
+
+  Prometheus metrics available at:
+    http://<backend-pod>:8080/actuator/prometheus
+
+🧹 Cleanup:
+
+  Remove all resources:
+    ./scripts/cleanup-k8s.sh
+
+💡 Useful Commands:
+
+  # View resources
+  kubectl get all -n krishna-devops
+  kubectl describe deployment backend -n krishna-devops
+
+  # Get shell access
+  kubectl exec -it deployment/backend -n krishna-devops -- sh
+
+  # View service endpoints
+  kubectl get endpoints -n krishna-devops
+
+  # Check HPA status
+  kubectl get hpa -n krishna-devops
+
+  # View events
+  kubectl get events -n krishna-devops --sort-by='.lastTimestamp'
+
+  # Get ingress details
+  kubectl describe ingress krishna-devops-ingress -n krishna-devops
+"

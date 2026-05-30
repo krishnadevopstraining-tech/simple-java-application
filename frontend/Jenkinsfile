@@ -1,0 +1,212 @@
+pipeline {
+    agent any
+
+    options {
+        timeout(time: 45, unit: 'MINUTES')
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
+    environment {
+        REGISTRY_URL = credentials('docker-registry-url')
+        REGISTRY_USERNAME = credentials('docker-registry-username')
+        REGISTRY_PASSWORD = credentials('docker-registry-password')
+        IMAGE_NAME = 'krishna-frontend'
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        SERVICE_NAME = 'frontend'
+        NODE_ENV = 'production'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo "🔄 Checking out ${SERVICE_NAME} source code..."
+                checkout scm
+                sh 'git log --oneline -5'
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                echo "📦 Installing ${SERVICE_NAME} dependencies..."
+                dir('frontend') {
+                    sh '''
+                        node --version
+                        npm --version
+                        npm ci
+                    '''
+                }
+            }
+        }
+
+        stage('Lint & Format Check') {
+            steps {
+                echo "🔍 Running linting and format checks..."
+                dir('frontend') {
+                    sh '''
+                        # ESLint or similar
+                        npm run lint || true
+                    '''
+                }
+            }
+        }
+
+        stage('Build') {
+            steps {
+                echo "🔨 Building ${SERVICE_NAME}..."
+                dir('frontend') {
+                    sh '''
+                        npm run build
+                    '''
+                }
+            }
+        }
+
+        stage('Unit Tests') {
+            steps {
+                echo "🧪 Running unit tests for ${SERVICE_NAME}..."
+                dir('frontend') {
+                    sh '''
+                        npm test -- --coverage || true
+                    '''
+                }
+            }
+        }
+
+        stage('Code Quality Analysis') {
+            steps {
+                echo "📊 Running SonarQube analysis..."
+                dir('frontend') {
+                    sh '''
+                        npm run sonar || true
+                    '''
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo "🐳 Building Docker image for ${SERVICE_NAME}..."
+                sh '''
+                    docker build \
+                        -f frontend/Dockerfile \
+                        -t ${REGISTRY_URL}/${IMAGE_NAME}:${IMAGE_TAG} \
+                        -t ${REGISTRY_URL}/${IMAGE_NAME}:latest \
+                        .
+                '''
+                sh 'docker image ls | grep ${IMAGE_NAME}'
+            }
+        }
+
+        stage('Security Scan') {
+            steps {
+                echo "🔒 Scanning Docker image for vulnerabilities..."
+                sh '''
+                    docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        aquasec/trivy image \
+                        ${REGISTRY_URL}/${IMAGE_NAME}:${IMAGE_TAG} \
+                        --severity HIGH,CRITICAL \
+                        || true
+                '''
+            }
+        }
+
+        stage('Push to Registry') {
+            when {
+                branch 'main'
+            }
+            steps {
+                echo "📤 Pushing Docker image to registry..."
+                sh '''
+                    echo "${REGISTRY_PASSWORD}" | docker login -u "${REGISTRY_USERNAME}" --password-stdin ${REGISTRY_URL}
+                    
+                    docker push ${REGISTRY_URL}/${IMAGE_NAME}:${IMAGE_TAG}
+                    docker push ${REGISTRY_URL}/${IMAGE_NAME}:latest
+                    
+                    docker logout ${REGISTRY_URL}
+                '''
+            }
+        }
+
+        stage('Deploy to Staging') {
+            when {
+                branch 'main'
+            }
+            steps {
+                echo "🚀 Deploying ${SERVICE_NAME} to staging..."
+                sh '''
+                    kubectl set image deployment/frontend \
+                        frontend=${REGISTRY_URL}/${IMAGE_NAME}:${IMAGE_TAG} \
+                        -n krishna-devops-staging || true
+                    
+                    kubectl rollout status deployment/frontend \
+                        -n krishna-devops-staging --timeout=5m || true
+                '''
+            }
+        }
+
+        stage('E2E Tests') {
+            when {
+                branch 'main'
+            }
+            steps {
+                echo "🧪 Running end-to-end tests..."
+                dir('frontend') {
+                    sh '''
+                        # Run E2E tests (e.g., Cypress, Playwright)
+                        npm run e2e || true
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy to Production') {
+            when {
+                branch 'main'
+                tag "v*"
+            }
+            input {
+                message "Deploy to production?"
+                ok "Deploy"
+            }
+            steps {
+                echo "🚀 Deploying ${SERVICE_NAME} to production..."
+                sh '''
+                    kubectl set image deployment/frontend \
+                        frontend=${REGISTRY_URL}/${IMAGE_NAME}:${IMAGE_TAG} \
+                        -n krishna-devops
+                    
+                    kubectl rollout status deployment/frontend \
+                        -n krishna-devops --timeout=10m
+                    
+                    echo "Production deployment completed"
+                '''
+            }
+        }
+
+        stage('Notify') {
+            steps {
+                echo "📬 Build notification..."
+                sh '''
+                    echo "✅ Frontend Pipeline Completed"
+                    echo "Image: ${REGISTRY_URL}/${IMAGE_NAME}:${IMAGE_TAG}"
+                    echo "Build Number: ${BUILD_NUMBER}"
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            echo '🧹 Cleaning up workspace...'
+            cleanWs()
+        }
+        success {
+            echo "✅ Frontend pipeline completed successfully!"
+        }
+        failure {
+            echo "❌ Frontend pipeline failed!"
+        }
+    }
+}
