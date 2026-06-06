@@ -1,0 +1,258 @@
+#!/usr/bin/env groovy
+
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'DEPLOY_ENV', choices: ['staging', 'production'], description: 'Deployment environment')
+        booleanParam(name: 'SKIP_TESTS', defaultValue: false, description: 'Skip tests')
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 1, unit: 'HOURS')
+        timestamps()
+    }
+
+    environment {
+        DOCKER_REGISTRY = "${env.docker_registry_url ?: 'docker.io'}"
+        IMAGE_NAME = 'krishna-database'
+        IMAGE_TAG = "${env.BUILD_NUMBER}-${env.GIT_COMMIT.take(7)}"
+        KUBECONFIG = '/var/jenkins_home/.kube/config'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                script {
+                    echo "🔄 Checking out source code..."
+                    checkout scm
+                    sh 'git log --oneline -1'
+                }
+            }
+        }
+
+        stage('Validate Schema') {
+            when {
+                changeset "database/**"
+            }
+            steps {
+                script {
+                    echo "✅ Validating database schema..."
+                    sh '''
+                        # Basic SQL syntax validation
+                        if ! grep -q "CREATE TABLE" database/init.sql; then
+                            echo "ERROR: No CREATE TABLE found in init.sql"
+                            exit 1
+                        fi
+                        echo "Schema validation passed"
+                    '''
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    echo "🐳 Building Docker image..."
+                    sh '''
+                        docker build -f database/Dockerfile \
+                            -t ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
+                            -t ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest \
+                            .
+                        
+                        echo "Image built successfully:"
+                        docker images | grep ${IMAGE_NAME}
+                    '''
+                }
+            }
+        }
+
+        stage('Test Database Image') {
+            when {
+                expression { !params.SKIP_TESTS }
+            }
+            steps {
+                script {
+                    echo "🧪 Testing database image..."
+                    sh '''
+                        # Run container in background
+                        CONTAINER_ID=$(docker run -d \
+                            -e POSTGRES_DB=krishna_db \
+                            -e POSTGRES_USER=postgres \
+                            -e POSTGRES_PASSWORD=postgres \
+                            -p 5433:5432 \
+                            ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG})
+                        
+                        echo "Database container started: $CONTAINER_ID"
+                        
+                        # Wait for database to be ready
+                        sleep 10
+                        
+                        # Test connection
+                        if docker exec $CONTAINER_ID pg_isready -U postgres -d krishna_db; then
+                            echo "✅ Database is ready"
+                        else
+                            echo "❌ Database health check failed"
+                            docker logs $CONTAINER_ID
+                            docker stop $CONTAINER_ID
+                            exit 1
+                        fi
+                        
+                        # Test schema initialization
+                        if docker exec $CONTAINER_ID psql -U postgres -d krishna_db -c "SELECT COUNT(*) FROM users;" > /dev/null 2>&1; then
+                            echo "✅ Schema initialized successfully"
+                        else
+                            echo "❌ Schema initialization failed"
+                            docker logs $CONTAINER_ID
+                            docker stop $CONTAINER_ID
+                            exit 1
+                        fi
+                        
+                        # Cleanup
+                        docker stop $CONTAINER_ID
+                        docker rm $CONTAINER_ID
+                    '''
+                }
+            }
+        }
+
+        stage('Security Scan') {
+            steps {
+                script {
+                    echo "🔒 Running security scan..."
+                    sh '''
+                        if command -v trivy &> /dev/null; then
+                            trivy image --severity HIGH,CRITICAL \
+                                ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} || true
+                        else
+                            echo "⚠️  Trivy not installed, skipping vulnerability scan"
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Push to Registry') {
+            when {
+                anyOf {
+                    branch 'main'
+                    tag 'v*'
+                }
+            }
+            steps {
+                script {
+                    echo "📤 Pushing image to registry..."
+                    withCredentials([usernamePassword(credentialsId: 'docker-registry', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        sh '''
+                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin ${DOCKER_REGISTRY}
+                            docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+                            docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest
+                            docker logout ${DOCKER_REGISTRY}
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Deploy Staging') {
+            when {
+                anyOf {
+                    branch 'main'
+                    tag 'v*'
+                }
+            }
+            steps {
+                script {
+                    echo "🚀 Deploying to staging namespace..."
+                    sh '''
+                        kubectl set image deployment/postgres \
+                            postgres=${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
+                            -n krishna-devops-staging
+                        
+                        kubectl rollout status deployment/postgres \
+                            -n krishna-devops-staging \
+                            --timeout=5m
+                    '''
+                }
+            }
+        }
+
+        stage('Health Check') {
+            when {
+                anyOf {
+                    branch 'main'
+                    tag 'v*'
+                }
+            }
+            steps {
+                script {
+                    echo "🏥 Running health checks..."
+                    sh '''
+                        echo "Checking database pod status..."
+                        kubectl get pods -n krishna-devops-staging -l app=postgres
+                        
+                        echo "Checking database logs..."
+                        kubectl logs -n krishna-devops-staging \
+                            deployment/postgres --tail=20 || true
+                        
+                        echo "Testing database connectivity..."
+                        POD=$(kubectl get pod -n krishna-devops-staging \
+                            -l app=postgres -o jsonpath="{.items[0].metadata.name}")
+                        
+                        if kubectl exec -n krishna-devops-staging $POD -- \
+                            pg_isready -U postgres -d krishna_db; then
+                            echo "✅ Database health check passed"
+                        else
+                            echo "⚠️  Database health check warning"
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy Production') {
+            when {
+                tag 'v*'
+            }
+            input {
+                message "Deploy to production?"
+                ok "Deploy"
+            }
+            steps {
+                script {
+                    echo "🚀 Deploying to production namespace..."
+                    sh '''
+                        kubectl set image deployment/postgres \
+                            postgres=${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
+                            -n krishna-devops
+                        
+                        kubectl rollout status deployment/postgres \
+                            -n krishna-devops \
+                            --timeout=5m
+                        
+                        echo "✅ Production deployment completed"
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                echo "🧹 Cleanup..."
+                sh '''
+                    # Remove dangling images
+                    docker rmi $(docker images -f "dangling=true" -q) || true
+                '''
+            }
+        }
+        success {
+            echo "✅ Pipeline completed successfully"
+        }
+        failure {
+            echo "❌ Pipeline failed"
+        }
+    }
+}
