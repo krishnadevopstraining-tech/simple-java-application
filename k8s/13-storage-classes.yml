@@ -1,0 +1,118 @@
+# Storage Classes for Advanced Storage Management
+# Demonstrates different storage class types and configurations
+
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: fast-storage
+  namespace: krishna-devops
+spec:
+  # Storage provisioner (varies by cloud provider)
+  provisioner: kubernetes.io/aws-ebs  # Change based on your provider
+  # For local/minikube: provisioner: kubernetes.io/no-provisioner
+  
+  parameters:
+    type: gp3  # General Purpose (AWS)
+    iops: "3000"
+    throughput: "125"
+  
+  # Reclaim policy: Delete, Retain, or Recycle
+  reclaimPolicy: Delete
+  
+  # Allow volume expansion
+  allowVolumeExpansion: true
+  
+  # Volume binding mode: Immediate or WaitForFirstConsumer
+  volumeBindingMode: Immediate
+
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: slow-storage
+  namespace: krishna-devops
+spec:
+  # For local development and testing
+  provisioner: kubernetes.io/aws-ebs
+  
+  parameters:
+    type: st1  # Throughput optimized (AWS)
+    throughput: "40"
+  
+  # Keep data after PVC deletion
+  reclaimPolicy: Retain
+  
+  # Wait for pod to be scheduled first
+  volumeBindingMode: WaitForFirstConsumer
+
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: database-storage
+  namespace: krishna-devops
+spec:
+  # High-performance storage for databases
+  provisioner: kubernetes.io/aws-ebs
+  
+  parameters:
+    type: gp3
+    iops: "5000"
+    throughput: "250"
+  
+  # Database data must be retained
+  reclaimPolicy: Retain
+  
+  # Immediate binding for database
+  volumeBindingMode: Immediate
+  
+  # Allow snapshots
+  allowVolumeExpansion: true
+
+---
+# Example PersistentVolumeClaim using fast-storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backend-cache-pvc
+  namespace: krishna-devops
+spec:
+  accessModes:
+    - ReadWriteOnce
+  # Use fast-storage class for backend cache
+  storageClassName: fast-storage
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+# Example PersistentVolumeClaim for database using database-storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data-pvc
+  namespace: krishna-devops
+spec:
+  accessModes:
+    - ReadWriteOnce
+  # Use database-storage class for PostgreSQL
+  storageClassName: database-storage
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+# Example PersistentVolumeClaim for logs using slow-storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: logs-pvc
+  namespace: krishna-devops
+spec:
+  accessModes:
+    - ReadWriteOnce
+  # Use slow-storage for logs (cost-optimized)
+  storageClassName: slow-storage
+  resources:
+    requests:
+      storage: 10Gi

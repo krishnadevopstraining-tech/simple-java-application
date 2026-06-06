@@ -1,0 +1,436 @@
+# Advanced Pod Scheduling: Taints, Tolerations, Node Affinity, Pod Affinity, Anti-Affinity
+# Educational manifest demonstrating all scheduling concepts
+
+# ============================================================================
+# SECTION 1: TAINTS (Applied to Nodes)
+# ============================================================================
+# Taints prevent pods from being scheduled unless they have matching tolerations
+# Command to apply taints (run on master):
+# kubectl taint nodes node-1 gpu=true:NoSchedule
+# kubectl taint nodes node-2 dedicated=backend:NoExecute
+# kubectl taint nodes node-3 special=database:PreferNoSchedule
+
+---
+# ============================================================================
+# SECTION 2: TOLERATIONS & NODE AFFINITY DEPLOYMENT (Backend)
+# ============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-affinity
+  namespace: krishna-devops
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: backend-affinity
+  template:
+    metadata:
+      labels:
+        app: backend-affinity
+    spec:
+      # ========== TOLERATIONS ==========
+      # Tolerations allow pods to be scheduled on nodes with taints
+      tolerations:
+        # Tolerate the dedicated=backend:NoExecute taint
+        - key: dedicated
+          operator: Equal
+          value: backend
+          effect: NoExecute
+          # Tolerate for 300 seconds before evicting (only for NoExecute)
+          tolerationSeconds: 300
+        
+        # Tolerate any node-not-ready for 300 seconds
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 300
+        
+        # Tolerate any unreachable node for 300 seconds
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 300
+      
+      # ========== NODE AFFINITY ==========
+      affinity:
+        nodeAffinity:
+          # Pod MUST be scheduled on nodes matching these rules
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  # Schedule only on nodes with tier: production label
+                  - key: tier
+                    operator: In
+                    values:
+                      - production
+                  # Schedule only on nodes with region: us-east label
+                  - key: region
+                    operator: In
+                    values:
+                      - us-east
+          
+          # Pod SHOULD be scheduled on nodes matching these rules (soft requirement)
+          preferredDuringSchedulingIgnoredDuringExecution:
+            # Prefer nodes with gpu: true label
+            - weight: 100  # Higher weight = higher preference (1-100)
+              preference:
+                matchExpressions:
+                  - key: gpu
+                    operator: In
+                    values:
+                      - "true"
+            
+            # Prefer nodes with ssd: true label
+            - weight: 50
+              preference:
+                matchExpressions:
+                  - key: ssd
+                    operator: In
+                    values:
+                      - "true"
+      
+      containers:
+        - name: backend
+          image: krishna-backend:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+
+---
+# ============================================================================
+# SECTION 3: POD AFFINITY (Attract pods together on same node)
+# ============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-pod-affinity
+  namespace: krishna-devops
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+        tier: presentation
+    spec:
+      affinity:
+        # Pod Affinity: Attract pods together
+        podAffinity:
+          # REQUIRED pod affinity
+          requiredDuringSchedulingIgnoredDuringExecution:
+            # Schedule frontend pods on same node as backend pods
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - backend-affinity
+              # topologyKey defines the scope (node, zone, region)
+              topologyKey: kubernetes.io/hostname
+        
+        # Pod Anti-Affinity: Keep pods away from each other
+        podAntiAffinity:
+          # SOFT anti-affinity
+          preferredDuringSchedulingIgnoredDuringExecution:
+            # Prefer spreading frontend pods across different zones
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - frontend
+                # Spread across availability zones
+                topologyKey: topology.kubernetes.io/zone
+      
+      containers:
+        - name: frontend
+          image: krishna-frontend:latest
+          ports:
+            - containerPort: 3000
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "250m"
+
+---
+# ============================================================================
+# SECTION 4: POD ANTI-AFFINITY (Keep pods apart)
+# ============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cache-pod-antiaffinity
+  namespace: krishna-devops
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: cache
+  template:
+    metadata:
+      labels:
+        app: cache
+        tier: cache
+    spec:
+      affinity:
+        # Pod Anti-Affinity: Keep pods on different nodes
+        podAntiAffinity:
+          # REQUIRED anti-affinity (strict)
+          requiredDuringSchedulingIgnoredDuringExecution:
+            # Never schedule on same node as another cache pod
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - cache
+              # Scope: kubernetes.io/hostname = different nodes
+              topologyKey: kubernetes.io/hostname
+      
+      containers:
+        - name: cache
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "250m"
+
+---
+# ============================================================================
+# SECTION 5: DATABASE DEPLOYMENT WITH ADVANCED SCHEDULING
+# ============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-advanced-scheduling
+  namespace: krishna-devops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-advanced
+  template:
+    metadata:
+      labels:
+        app: postgres-advanced
+        tier: database
+    spec:
+      # ========== TOLERATIONS FOR DATABASE ==========
+      tolerations:
+        # Tolerate the special=database:PreferNoSchedule taint
+        - key: special
+          operator: Equal
+          value: database
+          effect: PreferNoSchedule
+        
+        # Tolerate default node not ready
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 600
+      
+      # ========== AFFINITY FOR DATABASE ==========
+      affinity:
+        nodeAffinity:
+          # Database MUST run on nodes labeled for databases
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  # Schedule only on database nodes
+                  - key: database-node
+                    operator: In
+                    values:
+                      - "true"
+                  # Prefer production tier
+                  - key: tier
+                    operator: In
+                    values:
+                      - production
+        
+        # Pod Anti-Affinity: Don't schedule other databases on same node
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: tier
+                    operator: In
+                    values:
+                      - database
+              topologyKey: kubernetes.io/hostname
+      
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          env:
+            - name: POSTGRES_DB
+              value: krishna_db
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: password
+          ports:
+            - containerPort: 5432
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+      
+      volumes:
+        - name: postgres-storage
+          persistentVolumeClaim:
+            claimName: postgres-data-pvc
+
+---
+# ============================================================================
+# SECTION 6: COMBINED SCHEDULING EXAMPLE (Production-Ready)
+# ============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-production
+  namespace: krishna-devops
+  labels:
+    app: backend-production
+    environment: production
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: backend-production
+  template:
+    metadata:
+      labels:
+        app: backend-production
+        tier: application
+        environment: production
+    spec:
+      # Tolerations for node taints
+      tolerations:
+        - key: production-only
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 300
+      
+      affinity:
+        # Node Affinity: Schedule on production nodes only
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: environment
+                    operator: In
+                    values:
+                      - production
+                  - key: tier
+                    operator: In
+                    values:
+                      - worker
+        
+        # Pod Affinity: Prefer to be on same node as cache
+        podAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - cache
+                topologyKey: kubernetes.io/hostname
+        
+        # Pod Anti-Affinity: Spread across different nodes
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - backend-production
+                topologyKey: kubernetes.io/hostname
+      
+      containers:
+        - name: backend
+          image: krishna-backend:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: production
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+
+---
+# ============================================================================
+# NOTES FOR STUDENTS:
+# ============================================================================
+# TAINTS: Prevents pods from being scheduled (node property)
+#   - NoSchedule: Don't schedule new pods
+#   - NoExecute: Evict existing pods
+#   - PreferNoSchedule: Try not to schedule (soft)
+#
+# TOLERATIONS: Allow pods to tolerate taints
+#   - Work together with taints
+#   - Can specify tolerationSeconds for NoExecute taints
+#
+# NODE AFFINITY: Control which nodes pods schedule on
+#   - requiredDuringScheduling: Must match (hard constraint)
+#   - preferredDuringScheduling: Should match (soft constraint, weight-based)
+#
+# POD AFFINITY: Attract pods together (co-locate)
+#   - Useful for tightly coupled services
+#   - Uses topologyKey for zone/node scope
+#
+# POD ANTI-AFFINITY: Keep pods apart (distribute)
+#   - Useful for high availability
+#   - Prevents multiple replicas on same node/zone
+#
+# TOPOLOGY KEY: Defines the scope
+#   - kubernetes.io/hostname: Per node
+#   - topology.kubernetes.io/zone: Per availability zone
+#   - topology.kubernetes.io/region: Per region
+# ============================================================================

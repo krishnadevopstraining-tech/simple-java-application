@@ -346,6 +346,45 @@ kubectl get pods -n krishna-devops
 kubectl get svc -n krishna-devops
 ```
 
+### Advanced Kubernetes Concepts
+
+This project includes 14 Kubernetes manifests demonstrating enterprise patterns:
+
+**1. Storage Classes (k8s/13-storage-classes.yml)**
+- Dynamic storage provisioning
+- Fast storage for databases (gp3, 5000 IOPS)
+- Slow storage for logs (st1, cost-optimized)
+- Volume reclaim policies and expansion
+
+**2. Advanced Scheduling (k8s/14-advanced-scheduling.yml)**
+- **Taints & Tolerations**: Prevent pods from inappropriate nodes
+- **Node Affinity**: Control pod-to-node scheduling (hard/soft rules)
+- **Pod Affinity**: Co-locate related pods together
+- **Pod Anti-Affinity**: Spread pods across nodes for HA
+- **Topology Keys**: Zone and region based scheduling
+
+See [KUBERNETES_ADVANCED.md](KUBERNETES_ADVANCED.md) for detailed explanations and hands-on exercises.
+
+### Kubernetes Manifests Overview
+
+```
+k8s/
+├── 01-namespace.yml              # Logical isolation
+├── 02-configmap.yml              # Configuration data
+├── 03-secrets.yml                # Sensitive data
+├── 04-postgres-pvc.yml           # Storage claim
+├── 05-postgres-deployment.yml    # Database
+├── 06-init-script-configmap.yml  # Database initialization
+├── 07-backend-deployment.yml     # Backend service
+├── 08-frontend-deployment.yml    # Frontend service
+├── 09-ingress.yml                # External routing
+├── 10-hpa.yml                    # Auto-scaling (3-10 replicas)
+├── 11-pdb.yml                    # Pod disruption budgets
+├── 12-monitoring.yml             # Prometheus monitoring
+├── 13-storage-classes.yml        # Dynamic storage provisioning
+└── 14-advanced-scheduling.yml    # Taints, affinity, anti-affinity
+```
+
 ### Access Services
 
 **Via Port-Forward:**
@@ -587,9 +626,33 @@ kubectl delete pod <pod-name> -n krishna-devops
 | [QUICKSTART.md](QUICKSTART.md) | Quick reference guide |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Detailed deployment procedures |
 | [DELIVERABLES.md](DELIVERABLES.md) | Project completeness checklist |
+| [KUBERNETES_ADVANCED.md](KUBERNETES_ADVANCED.md) | **Advanced K8s scheduling & storage** |
 | [backend/README.md](backend/README.md) | Backend service details |
 | [frontend/README.md](frontend/README.md) | Frontend service details |
 | [database/README.md](database/README.md) | Database documentation |
+
+### 🎓 Educational Scripts
+
+Run these to learn about the project:
+
+```bash
+# Line-by-line explanation of the entire project for students
+bash scripts/explain-project.sh
+```
+
+This interactive script explains:
+- Project structure and organization
+- Backend service (Spring Boot)
+- Frontend service (React)
+- Database service (PostgreSQL)
+- Docker containerization
+- Jenkins CI/CD pipelines
+- Kubernetes deployment
+- Advanced scheduling concepts
+- Complete deployment workflow
+- Key concepts and best practices
+- Hands-on commands
+
 
 ---
 
